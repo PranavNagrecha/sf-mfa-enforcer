@@ -102,22 +102,29 @@ class Tokenizer:
 # ── Salesforce query runner ───────────────────────────────────────────────────
 
 def run_query(soql, org):
-    result = subprocess.run(
-        ["sf", "data", "query", "--query", soql, "--target-org", org, "--json"],
-        capture_output=True, text=True
-    )
+    try:
+        result = subprocess.run(
+            ["sf", "data", "query", "--query", soql, "--target-org", org, "--json"],
+            capture_output=True, text=True
+        )
+    except FileNotFoundError:
+        print("  ERROR: 'sf' CLI not found. Install Salesforce CLI: https://developer.salesforce.com/tools/salesforcecli")
+        sys.exit(1)
     try:
         d = json.loads(result.stdout)
-        return d.get("result", {}).get("records", [])
     except json.JSONDecodeError:
-        print(f"  Query failed: {result.stderr[:200]}")
+        print(f"  Query failed (no JSON): {result.stderr[:300]}")
         return []
+    if d.get("status") != 0:
+        print(f"  SOQL error: {d.get('message', str(d))[:300]}")
+        sys.exit(1)
+    return d.get("result", {}).get("records", [])
 
 # ── Org identity ─────────────────────────────────────────────────────────────
 
 def fetch_org_identity(org):
     records = run_query(
-        "SELECT Name, Domain, InstanceName, IsSandbox FROM Organization LIMIT 1",
+        "SELECT Name, InstanceName, IsSandbox FROM Organization LIMIT 1",
         org
     )
     if not records:
@@ -125,7 +132,6 @@ def fetch_org_identity(org):
     r = records[0]
     return {
         "orgName":      r.get("Name", ""),
-        "domain":       r.get("Domain", ""),
         "instanceName": r.get("InstanceName", ""),
         "isSandbox":    r.get("IsSandbox", False),
     }
@@ -157,18 +163,17 @@ def collect(org):
     tz = Tokenizer()
     print(f"\nRunning audit against: {org}\n")
 
-    print("  [0/3] Org identity...")
+    print("  [0/4] Org identity...")
     org_identity = fetch_org_identity(org)
-    org_name   = org_identity.get("orgName", "")
-    org_domain = org_identity.get("domain", "")
-    org_terms  = tuple(t for t in (org_name, org_domain) if t)
+    org_name  = org_identity.get("orgName", "")
+    org_terms = (org_name,) if org_name else ()
     if org_name:
         print(f"         {org_name}  ({org_identity.get('instanceName', '')})")
 
     # Q1 — Admin users: System Administrator profile + any profile with admin-equivalent
     # permissions. The permission checks catch cloned profiles ("Super Admin", "IT Admin", etc.)
     # that don't match the standard profile name but carry the same powers.
-    print("  [1/3] Admin users...")
+    print("  [1/4] Admin users...")
     q1 = run_query("""
         SELECT Id, Name, Username, Profile.Name, Profile.PermissionsApiUserOnly, LastLoginDate
         FROM User
@@ -197,7 +202,7 @@ def collect(org):
         })
 
     # Q2 — Permission set sweep (PS + PSG components)
-    print("  [2/3] Permission set sweep...")
+    print("  [2/4] Permission set sweep...")
     q2 = run_query("""
         SELECT Assignee.Id, Assignee.Name, Assignee.Username, Assignee.Profile.Name,
                PermissionSet.Name, PermissionSetGroup.MasterLabel,
@@ -239,8 +244,8 @@ def collect(org):
 
     # Q4 — Users with "Waive Multi-Factor Authentication for Exempt Users" permission.
     # After enforcement this exemption is disabled — these users must enroll MFA.
-    # Field name to verify: run the query below against your org to confirm it exists:
-    #   SELECT PermissionsBypassMFAForUiLogins FROM PermissionSet LIMIT 1
+    # Field verified: SELECT PermissionsBypassMFAForUiLogins FROM PermissionSet LIMIT 1
+    # Note: FieldDefinition does not index Permission* fields — use direct object query to verify.
     print("  [3/4] Waive MFA exemption holders...")
     q4 = run_query("""
         SELECT Assignee.Id, Assignee.Name, Assignee.Username, Assignee.Profile.Name
@@ -276,11 +281,11 @@ def collect(org):
     for chunk in chunks(all_scope_ids):
         id_list = "', '".join(chunk)
         rows = run_query(f"""
-            SELECT UserId, LoginType, Application, ApiType, Browser, Platform, COUNT(Id) cnt
+            SELECT UserId, LoginType, Application, Browser, Platform, COUNT(Id) cnt
             FROM LoginHistory
             WHERE UserId IN ('{id_list}')
             AND LoginTime = LAST_N_DAYS:30
-            GROUP BY UserId, LoginType, Application, ApiType, Browser, Platform
+            GROUP BY UserId, LoginType, Application, Browser, Platform
         """, org)
         for r in rows:
             tok     = tz.tokenize(r.get("UserId", ""))
@@ -289,22 +294,21 @@ def collect(org):
                 "token":        tok,
                 "loginType":    r.get("LoginType"),
                 "application":  scrub_app(r.get("Application") or "", org_terms),
-                "apiType":      r.get("ApiType") or "",
                 "browser":      r.get("Browser") or "",
                 "platform":     r.get("Platform") or "",
                 "count":        r.get("cnt"),
                 "localVerdict": verdict
             })
 
-    # orgName and domain are used only for scrubbing above — not included in payload
-    # so Claude never sees the org's real name.
+    # orgName and domain are used only for scrubbing above — not included in payload.
+    # meta.org is replaced with a placeholder so the AI payload contains nothing org-identifying.
     payload = {
         "meta": {
-            "org":              org,
+            "org":              "<redacted>",
             "isSandbox":        org_identity.get("isSandbox", False),
             "instanceName":     org_identity.get("instanceName", ""),
             "generatedAt":      datetime.now(timezone.utc).isoformat(),
-            "enforcementDates": {"sandbox": "2026-06-22", "production": "2026-07-20"}
+            "enforcementDates": {"sandbox": "2026-06-22", "production": "2026-07-01"}
         },
         "apiOnlyTokens":      sorted(api_only_tokens),
         "waivedUsers":        waived_users,
@@ -346,7 +350,7 @@ def classify_locally(payload):
         # Structurally API-only: Salesforce blocks UI logins regardless of MFA setting.
         if tok in api_only:
             total, _ = _counts(logins) if logins else (0, 0)
-            login_note = f" ({total:,} historical logins, all API)" if total else " (no recent logins)"
+            login_note = f" ({total:,} historical logins)" if total else " (no recent logins)"
             findings.append({
                 "token":   tok,
                 "verdict": "exempt",
@@ -386,11 +390,22 @@ def classify_locally(payload):
                 "verdict": "breaks",
                 "reason":  f"{breaking:,}/{total:,} logins ({pct_str}) will break at enforcement."
             })
+        elif "unknown" in verdicts and "breaks" not in verdicts:
+            unknown_types = sorted({
+                l["loginType"] for l in logins
+                if l["localVerdict"] == "unknown" and l["loginType"]
+            })
+            known_str = f" Also has {', '.join(sorted(verdicts - {'unknown'}))} patterns." if verdicts - {"unknown"} else ""
+            findings.append({
+                "token":   tok,
+                "verdict": "review",
+                "reason":  f"{total:,} logins — unrecognized types: {', '.join(unknown_types)}. Manual review needed.{known_str}"
+            })
         elif "conditional" in verdicts and "breaks" not in verdicts:
             findings.append({
                 "token":   tok,
                 "verdict": "conditional",
-                "reason":  f"{total:,} logins via SAML SSO. Safe if IdP enforces phishing-resistant MFA and passes ACR/AMR claims."
+                "reason":  f"{total:,} logins via SAML SSO. Safe only if IdP passes a phishing-resistant ACR/AMR signal — ask your IdP team to confirm one of: cert, fido, fido2, fpt, hwk, iris, pin, pki, pop, retina, sc, Smartcard, swk, TLSClient, user, vbm, wia, X509. Standard MFA signals (okta_verify, passkey, webauthn) are NOT sufficient for privileged users."
             })
         elif verdicts == {"exempt"}:
             findings.append({
@@ -436,10 +451,10 @@ def classify_locally(payload):
 
 # ── Reconcile + report ────────────────────────────────────────────────────────
 
-def reconcile_and_report(findings, tz, payload):
+def reconcile_and_report(findings, tz, payload, org_label=None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    org = payload.get("meta", {}).get("org", "unknown")
+    org = org_label or payload.get("meta", {}).get("org", "unknown")
 
     rows = []
     for f in findings:
@@ -465,7 +480,7 @@ def reconcile_and_report(findings, tz, payload):
 
     report = f"""# MFA Compliance Report
 **Generated:** {now} | **Org:** {org}
-**Enforcement:** Sandbox June 22 2026 (staggered ~7 days)  ·  Production July 20 2026 (staggered ~30 days)
+**Enforcement:** Sandbox June 22 2026 (staggered ~7 days)  ·  Production July 1 2026 (staggered ~30 days)
 
 ---
 
@@ -489,9 +504,14 @@ def reconcile_and_report(findings, tz, payload):
     report += f"""
 ## Conditional — Depends on IdP (Entra ID / Okta)
 
-These users log in via SAML SSO only. Safe if the identity provider enforces
-phishing-resistant MFA and passes ACR/AMR claims back to Salesforce.
-Confirm with your identity team before the enforcement date.
+These users log in via SAML SSO only. Because they are **privileged users**, standard MFA signals
+(e.g. `okta_verify`, `passkey`, `webauthn`) are not sufficient — the IdP must pass a
+**phishing-resistant** ACR/AMR signal. Ask your identity team to confirm the ID token or SAML
+response includes one of these values:
+
+`cert` · `fido` · `fido2` · `fpt` · `hwk` · `iris` · `pin` · `pki` · `pop` · `retina` · `sc` · `Smartcard` · `swk` · `TLSClient` · `user` · `vbm` · `wia` · `X509`
+
+If the IdP cannot confirm this, treat these users the same as **Breaks**.
 
 | User | Username |
 |---|---|
@@ -550,7 +570,7 @@ If neither is present, no one can register a phishing-resistant method.
 
 ## Actions
 
-1. Confirm IdP passes ACR/AMR claims — covers all conditional (SSO) users
+1. Confirm IdP passes a phishing-resistant ACR/AMR signal (fido, fido2, hwk, etc.) — standard MFA signals are not enough for privileged users
 2. Enable Built-in Authenticator + U2F in Session Settings > High Assurance
 3. Stop UI logins on shared integration accounts — use named admin accounts
 4. Enroll or deactivate dormant users before enforcement date
@@ -679,7 +699,7 @@ def main():
         payload, tz = collect(args.org)
         print("\nClassifying locally...")
         findings = classify_locally(payload)
-        reconcile_and_report(findings, tz, payload)
+        reconcile_and_report(findings, tz, payload, org_label=args.org)
 
     elif args.collect:
         if not args.org:
@@ -699,7 +719,7 @@ def main():
         else:
             print("No findings file provided — running local classification.")
             findings = classify_locally(payload)
-        reconcile_and_report(findings, tz, payload)
+        reconcile_and_report(findings, tz, payload, org_label=args.org)
 
     else:
         parser.print_help()

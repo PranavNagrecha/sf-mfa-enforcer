@@ -115,8 +115,8 @@ Uses deterministic classification rules built into `audit.py`. Same reports, no 
 
 ## Enforcement Context
 
-- **Sandbox:** June 22, 2026
-- **Production:** July 1, 2026
+- **Sandbox:** June 22, 2026 (staggered ~7 days)
+- **Production:** July 1, 2026 (staggered ~30 days)
 
 **In scope:** System Administrator profile + any user with ModifyAllData, ViewAllData, CustomizeApplication, or AuthorApex — via profile, permission set, or permission set group.
 
