@@ -1,0 +1,15 @@
+# Output directory — contains token_map.json (real user identities) and reports
+# NEVER commit this directory
+mfa-audit-output/
+
+# Data exports — never commit real org data
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store

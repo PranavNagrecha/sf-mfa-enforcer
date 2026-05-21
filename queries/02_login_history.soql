@@ -1,0 +1,9 @@
+SELECT UserId, LoginType, Application, ApiType, Browser, Platform, Status, COUNT(Id) LoginCount, MAX(LoginTime) LastSeen
+FROM LoginHistory
+WHERE UserId IN (
+    SELECT Id FROM User
+    WHERE IsActive = true
+    AND Profile.Name = 'System Administrator'
+)
+AND LoginTime = LAST_N_DAYS:30
+GROUP BY UserId, LoginType, Application, ApiType, Browser, Platform, Status

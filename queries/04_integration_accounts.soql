@@ -1,0 +1,14 @@
+SELECT Id, Name, Username, Profile.Name, UserType, LastLoginDate
+FROM User
+WHERE IsActive = true
+AND UserType = 'Standard'
+AND (
+    Username LIKE '%integration%' OR Username LIKE '%api%'
+    OR Username LIKE '%conga%' OR Username LIKE '%boomi%'
+    OR Username LIKE '%mulesoft%' OR Username LIKE '%marketo%'
+    OR Username LIKE '%traction%' OR Username LIKE '%flosum%'
+    OR Name LIKE '%Integration%' OR Name LIKE '%API%'
+    OR Name LIKE '%Service%' OR Name LIKE '%Automation%'
+    OR Name LIKE '%Bot%' OR Name LIKE '%System%'
+)
+ORDER BY Profile.Name, Name

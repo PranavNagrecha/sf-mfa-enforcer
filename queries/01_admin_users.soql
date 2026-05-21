@@ -1,0 +1,5 @@
+SELECT Id, Name, Username, Profile.Name, LastLoginDate
+FROM User
+WHERE IsActive = true
+AND Profile.Name = 'System Administrator'
+ORDER BY LastLoginDate DESC NULLS LAST

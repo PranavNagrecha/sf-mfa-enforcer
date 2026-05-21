@@ -1,0 +1,11 @@
+SELECT PermissionSetGroup.MasterLabel, PermissionSet.Name,
+       PermissionSet.PermissionsModifyAllData, PermissionSet.PermissionsViewAllData,
+       PermissionSet.PermissionsCustomizeApplication, PermissionSet.PermissionsAuthorApex
+FROM PermissionSetGroupComponent
+WHERE (
+    PermissionSet.PermissionsModifyAllData = true
+    OR PermissionSet.PermissionsViewAllData = true
+    OR PermissionSet.PermissionsCustomizeApplication = true
+    OR PermissionSet.PermissionsAuthorApex = true
+)
+ORDER BY PermissionSetGroup.MasterLabel

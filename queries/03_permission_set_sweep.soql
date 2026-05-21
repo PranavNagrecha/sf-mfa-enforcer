@@ -1,0 +1,15 @@
+SELECT Assignee.Name, Assignee.Username, Assignee.Profile.Name, Assignee.IsActive,
+       PermissionSet.Name, PermissionSetGroup.MasterLabel,
+       PermissionSet.PermissionsModifyAllData, PermissionSet.PermissionsViewAllData,
+       PermissionSet.PermissionsCustomizeApplication, PermissionSet.PermissionsAuthorApex
+FROM PermissionSetAssignment
+WHERE IsActive = true
+AND Assignee.IsActive = true
+AND (
+    PermissionSet.PermissionsModifyAllData = true
+    OR PermissionSet.PermissionsViewAllData = true
+    OR PermissionSet.PermissionsCustomizeApplication = true
+    OR PermissionSet.PermissionsAuthorApex = true
+)
+AND PermissionSet.IsOwnedByProfile = false
+ORDER BY Assignee.Name
