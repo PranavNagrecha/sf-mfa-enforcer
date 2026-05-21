@@ -84,7 +84,7 @@ For each token in `adminUsers` and `permissionSetSweep`, produce a finding:
 
 **What to look for beyond the rules:**
 - Tokens with very high SOAP/API counts but also any browser UI login — mixed-use
-- Tokens with only `SAML SSO` logins — conditional, note the ACR/AMR dependency
+- Tokens with only `SAML SSO` logins — conditional. Include in the reason: "Safe only if IdP passes a phishing-resistant ACR/AMR signal. Ask your IdP team to confirm one of: cert, fido, fido2, fpt, hwk, iris, pin, pki, pop, retina, sc, Smartcard, swk, TLSClient, user, vbm, wia, X509. Standard MFA signals (okta_verify, passkey, webauthn) are NOT sufficient for privileged users."
 - Tokens with `Lightning Login` — always breaks, not phishing-resistant
 - Tokens in `permissionSetSweep` not in `adminUsers` — non-admin profile users with elevated permissions, check their login history in the payload
 
@@ -115,13 +115,22 @@ Uses deterministic classification rules built into `audit.py`. Same reports, no 
 
 ## Enforcement Context
 
-- **Sandbox:** June 22, 2026 (staggered ~7 days)
-- **Production:** July 1, 2026 (staggered ~30 days)
+There are two separate enforcement waves. This skill covers Wave 1 only.
+
+**Wave 1 — Phishing-resistant MFA for privileged users (this skill's scope)**
+- Sandbox: June 22, 2026 (staggered ~7 days)
+- Production: July 1, 2026 (staggered ~30 days)
+- Reference: Salesforce Help Article 005321563
+
+**Wave 2 — Standard MFA for all other employees (out of scope)**
+- Sandbox: June 22, 2026 (staggered ~7 days)
+- Production: July 20, 2026 (staggered ~30 days)
+- Reference: Salesforce Help Article 005321561
 
 **In scope:** System Administrator profile + any user with ModifyAllData, ViewAllData, CustomizeApplication, or AuthorApex — via profile, permission set, or permission set group.
 
 **Phishing-resistant only:** FIDO2 security keys, passkeys (Touch ID, Face ID, Windows Hello).
 
-**Exempt:** SOAP API logins, headless OAuth Connected Apps.
+**Exempt:** SOAP API logins, headless OAuth Connected Apps (JWT Bearer, Client Credentials). OAuth Web Server and Hybrid flows that require browser authorisation are NOT exempt.
 
 **Not phishing-resistant:** TOTP, push notifications, Lightning Login, SMS.
