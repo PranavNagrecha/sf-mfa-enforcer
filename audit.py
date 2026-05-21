@@ -405,23 +405,13 @@ def classify_locally(payload):
             findings.append({
                 "token":   tok,
                 "verdict": "conditional",
-                "reason":  f"{total:,} logins via SAML SSO. Safe only if IdP passes a phishing-resistant ACR/AMR signal — ask your IdP team to confirm one of: cert, fido, fido2, fpt, hwk, iris, pin, pki, pop, retina, sc, Smartcard, swk, TLSClient, user, vbm, wia, X509. Standard MFA signals (okta_verify, passkey, webauthn) are NOT sufficient for privileged users."
+                "reason":  f"{total:,} logins via SAML SSO. Treat as breaks until your IdP team confirms the SAML assertion includes a phishing-resistant AMR signal — one of: cert, fido, fido2, fpt, hwk, iris, pin, pki, pop, retina, sc, Smartcard, swk, TLSClient, user, vbm, wia, X509. Standard MFA signals (okta_verify, passkey, webauthn) are not sufficient for privileged users."
             })
         elif verdicts == {"exempt"}:
             findings.append({
                 "token":   tok,
                 "verdict": "exempt",
                 "reason":  f"All {total:,} logins exempt — no breaking patterns detected."
-            })
-        elif "unknown" in verdicts:
-            unknown_types = sorted({
-                l["loginType"] for l in logins
-                if l["localVerdict"] == "unknown" and l["loginType"]
-            })
-            findings.append({
-                "token":   tok,
-                "verdict": "review",
-                "reason":  f"{total:,} logins — unrecognized types: {', '.join(unknown_types)}. Manual review needed."
             })
         else:
             findings.append({
@@ -504,14 +494,15 @@ def reconcile_and_report(findings, tz, payload, org_label=None):
     report += f"""
 ## Conditional — Depends on IdP (Entra ID / Okta)
 
-These users log in via SAML SSO only. Because they are **privileged users**, standard MFA signals
-(e.g. `okta_verify`, `passkey`, `webauthn`) are not sufficient — the IdP must pass a
-**phishing-resistant** ACR/AMR signal. Ask your identity team to confirm the ID token or SAML
-response includes one of these values:
+These users log in via SAML SSO only. **Assume breaks until confirmed otherwise.**
+
+Salesforce does not record ACR/AMR claim values in LoginHistory, so compliance cannot be
+verified from login data alone. Ask your identity team to confirm the SAML assertion includes
+a phishing-resistant AMR signal — one of:
 
 `cert` · `fido` · `fido2` · `fpt` · `hwk` · `iris` · `pin` · `pki` · `pop` · `retina` · `sc` · `Smartcard` · `swk` · `TLSClient` · `user` · `vbm` · `wia` · `X509`
 
-If the IdP cannot confirm this, treat these users the same as **Breaks**.
+Standard MFA signals (`okta_verify`, `passkey`, `webauthn`) are not sufficient for privileged users.
 
 | User | Username |
 |---|---|
